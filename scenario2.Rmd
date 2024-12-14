@@ -1,0 +1,198 @@
+---
+title: "Scenario 2"
+output: scenario2_notebook
+---
+Step 1: Define Helper Functions
+```{r}
+# Function to generate customer arrival times dynamically
+generate_arrival_times <- function(lambda_A, hours) {
+  total_time <- hours * 60 # Convert hours to minutes
+  arrivals <- numeric(0)
+  current_time <- 0
+  while (current_time <= total_time) {
+    current_time <- current_time + rexp(1, rate = lambda_A / 60)
+    if (current_time <= total_time) {
+      arrivals <- c(arrivals, current_time)
+    }
+  }
+  arrivals
+}
+
+# Function to generate service times
+generate_service_times <- function(num_customers, lambda_S) {
+  rexp(num_customers, rate = lambda_S / 60) # Scale lambda_S to per minute
+}
+
+# Function to simulate queue dynamics
+simulate_queue <- function(arrivals, service_times, num_tables) {
+  num_customers <- length(arrivals)
+  if (num_customers == 0) {
+    stop("No customers arrived during the simulation period.")
+  }
+  
+  # Initialize variables
+  departure_times <- rep(0, num_tables) # Track departure times for each table
+  waiting_times <- numeric(num_customers)
+  queue_lengths <- numeric(num_customers)
+  down_time <- 0
+  
+  for (i in 1:num_customers) {
+    # Find the next available table
+    earliest_table <- which.min(departure_times)
+    
+    if (arrivals[i] >= departure_times[earliest_table]) {
+      # No waiting, table is free
+      waiting_times[i] <- 0
+      departure_times[earliest_table] <- arrivals[i] + service_times[i]
+      
+      # Down-time calculation
+      if (arrivals[i] > departure_times[earliest_table]) {
+        down_time <- down_time + (arrivals[i] - departure_times[earliest_table])
+      }
+    } else {
+      # Customer waits for the earliest table to free up
+      waiting_times[i] <- departure_times[earliest_table] - arrivals[i]
+      departure_times[earliest_table] <- departure_times[earliest_table] + service_times[i]
+    }
+    
+    # Queue length: Count customers still waiting or being served
+    queue_lengths[i] <- sum(arrivals <= arrivals[i] & sapply(departure_times, function(d) d > arrivals[i]))
+  }
+  
+  list(
+    waiting_times = waiting_times,
+    queue_lengths = queue_lengths,
+    down_time = down_time / num_tables, # Average down-time across tables
+    departure_times = departure_times
+  )
+}
+
+# Function to calculate metrics
+calculate_metrics <- function(results, num_customers, hours, num_chefs) {
+  meals_served <- num_customers
+  revenue <- meals_served * 50
+  labor_cost <- num_chefs * hours * 40
+  profit <- revenue - labor_cost
+  
+  list(
+    avg_waiting_time = mean(results$waiting_times),
+    max_waiting_time = max(results$waiting_times),
+    avg_queue_length = mean(results$queue_lengths),
+    max_queue_length = max(results$queue_lengths),
+    total_down_time = results$down_time,
+    revenue = revenue,
+    labor_cost = labor_cost,
+    profit = profit
+  )
+}
+```
+
+Step 2: Set Parameters and Generate Arrivals
+```{r}
+# Parameters for Scenario 2
+lambda_A <- 10  # Customer arrival rate (per hour)
+hours <- 12     # Operating hours (10 AM - 10 PM)
+num_tables <- 5
+num_chefs <- 3  # Adjust this value to explore different chef counts
+
+# Generate arrivals
+arrival_times <- generate_arrival_times(lambda_A, hours)
+print("Arrival times (in minutes):")
+print(arrival_times)
+
+```
+Step 3: Generate Service Times
+```{r}
+# Generate service times
+lambda_S <- 3 * num_chefs  # Service rate depends on the number of chefs
+service_times <- generate_service_times(length(arrival_times), lambda_S)
+print("Service times (in minutes):")
+print(service_times)
+```
+Step 4: Simulate Queue
+```{r}
+#Simulate queue dynamics
+queue_results <- simulate_queue(arrival_times, service_times, num_tables)
+print("Queue simulation results:")
+print(queue_results)
+```
+
+Step 5: Calculate Metrics
+```{r}
+#Calculate metrics
+metrics <- calculate_metrics(queue_results, length(arrival_times), hours, num_chefs)
+print("Metrics summary:")
+print(metrics)
+```
+
+Step 6: Visualize
+```{r}
+# Histogram of waiting times
+hist(queue_results$waiting_times, breaks = 20, main = "Histogram of Waiting Times",
+     xlab = "Waiting Time (minutes)", col = "blue")
+
+# Time-series of queue lengths
+plot(queue_results$queue_lengths, type = "l", col = "red", main = "Queue Lengths Over Time",
+     xlab = "Customer Index", ylab = "Queue Length")
+
+# Revenue vs. Cost
+barplot(c(metrics$revenue, metrics$labor_cost, metrics$profit),
+        names.arg = c("Revenue", "Labor Cost", "Profit"), col = c("green", "red", "blue"),
+        main = "Revenue, Cost, and Profit", ylab = "Amount ($)")
+```
+
+Step 7: Optimize Chef Count
+```{r}
+# Optimization: Vary the number of chefs (L)
+results <- data.frame(L = integer(), AvgWaitingTime = numeric(), Profit = numeric())
+
+for (num_chefs in 1:10) { # Test chef counts from 1 to 10
+  lambda_S <- 3 * num_chefs  # Update service rate for each chef count
+  service_times <- generate_service_times(length(arrival_times), lambda_S)
+  queue_results <- simulate_queue(arrival_times, service_times, num_tables)
+  metrics <- calculate_metrics(queue_results, length(arrival_times), hours, num_chefs)
+  
+  # Store the results for analysis
+  results <- rbind(results, data.frame(
+    L = num_chefs,
+    AvgWaitingTime = metrics$avg_waiting_time,
+    Profit = metrics$profit
+  ))
+}
+
+# Print the optimization results
+print(results)
+```
+
+Step 8: Visualize Optimization Results: 
+```{r}
+# Plot optimization results
+par(mfrow = c(2, 1)) # Arrange plots vertically
+
+# Plot profit vs. number of chefs
+plot(results$L, results$Profit, type = "b", col = "blue",
+     main = "Profit vs. Number of Chefs", xlab = "Number of Chefs", ylab = "Profit ($)")
+
+# Plot average waiting time vs. number of chefs
+plot(results$L, results$AvgWaitingTime, type = "b", col = "red",
+     main = "Avg Waiting Time vs. Number of Chefs", xlab = "Number of Chefs", ylab = "Avg Waiting Time (min)")
+
+```
+
+
+Step 9: Summarize Findings
+```{r}
+### Summary of Findings
+
+- **Optimal Number of Chefs (\( L \))**:
+  The analysis shows that profit is maximized at \( L = X \) chefs (based on the results above).
+  
+- **Trade-Offs**:
+  Increasing the number of chefs reduces the average waiting time, improving customer satisfaction. However, it also increases labor costs, which reduces profit after a certain point.
+
+- **Recommendations**:
+  For the current setup with 5 tables and a 12-hour operating period, the restaurant should employ \( L = X \) chefs to balance profitability and customer satisfaction.
+```
+
+
+

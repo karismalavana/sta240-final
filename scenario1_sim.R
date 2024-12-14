@@ -1,0 +1,106 @@
+# Function to generate customer arrival times dynamically
+generate_arrival_times <- function(lambda_A, hours) {
+  total_time <- hours * 60 # Convert hours to minutes
+  arrivals <- numeric(0)
+  current_time <- 0
+  while (current_time <= total_time) {
+    current_time <- current_time + rexp(1, rate = lambda_A / 60)
+    if (current_time <= total_time) {
+      arrivals <- c(arrivals, current_time)
+    }
+  }
+  arrivals
+}
+
+# Function to generate service times
+generate_service_times <- function(num_customers, lambda_S) {
+  rexp(num_customers, rate = lambda_S / 60) # Convert rate to per minute
+}
+
+# Function to simulate queue dynamics
+simulate_queue <- function(arrivals, service_times) {
+  num_customers <- length(arrivals)
+  if (num_customers == 0) {
+    stop("No customers arrived during the simulation period.")
+  }
+  
+  departure_times <- numeric(num_customers)
+  waiting_times <- numeric(num_customers)
+  queue_lengths <- numeric(num_customers)
+  down_time <- 0
+  
+  for (i in 1:num_customers) {
+    if (i == 1 || arrivals[i] >= departure_times[i - 1]) {
+      # No waiting
+      waiting_times[i] <- 0
+      departure_times[i] <- arrivals[i] + service_times[i]
+      
+      # Down-time calculation
+      if (i > 1 && arrivals[i] > departure_times[i - 1]) {
+        down_time <- down_time + (arrivals[i] - departure_times[i - 1])
+      }
+    } else {
+      # Customer waits
+      waiting_times[i] <- departure_times[i - 1] - arrivals[i]
+      departure_times[i] <- departure_times[i - 1] + service_times[i]
+    }
+    
+    # Queue length: count customers still waiting or being served
+    queue_lengths[i] <- sum(arrivals <= arrivals[i] & departure_times > arrivals[i])
+  }
+  
+  list(
+    waiting_times = waiting_times,
+    queue_lengths = queue_lengths,
+    down_time = down_time,
+    departure_times = departure_times
+  )
+}
+
+# Function to calculate metrics with percentiles
+calculate_metrics <- function(results) {
+  list(
+    avg_waiting_time = mean(results$waiting_times),
+    max_waiting_time = max(results$waiting_times),
+    p95_waiting_time = quantile(results$waiting_times, 0.95),
+    avg_queue_length = mean(results$queue_lengths),
+    max_queue_length = max(results$queue_lengths),
+    p95_queue_length = quantile(results$queue_lengths, 0.95),
+    total_down_time = results$down_time / 60 # Convert to hours
+  )
+}
+
+# Parameters for Scenario 1
+lambda_A <- 5  # Customer arrival rate (per hour)
+lambda_S <- 6  # Service rate (per hour)
+hours <- 12    # Operating hours (10 AM - 10 PM)
+
+# Step 1: Generate arrivals and service times
+arrival_times <- generate_arrival_times(lambda_A, hours)
+service_times <- generate_service_times(length(arrival_times), lambda_S)
+
+# Step 2: Simulate queue
+queue_results <- simulate_queue(arrival_times, service_times)
+
+# Step 3: Calculate metrics
+metrics <- calculate_metrics(queue_results)
+
+# Step 4: Display results
+print(metrics)
+
+# Step 5: Visualization
+# Histogram of waiting times
+hist(queue_results$waiting_times, breaks = 20, main = "Histogram of Waiting Times",
+     xlab = "Waiting Time (minutes)", col = "blue")
+
+# Time-series of queue lengths
+plot(queue_results$queue_lengths, type = "l", col = "red", main = "Queue Lengths Over Time",
+     xlab = "Customer Index", ylab = "Queue Length")
+
+# Visualize arrivals vs. departures
+departure_times <- queue_results$departure_times
+plot(arrival_times, type = "h", col = "blue", ylim = c(0, max(departure_times)),
+     main = "Arrivals and Departures", xlab = "Customer Index", ylab = "Time (minutes)")
+points(departure_times, col = "green", type = "h")
+legend("topright", legend = c("Arrivals", "Departures"), col = c("blue", "green"), lty = 1)
+
