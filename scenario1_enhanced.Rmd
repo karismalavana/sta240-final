@@ -1,0 +1,162 @@
+
+---
+title: "Scenario 1 Enhanced Simulation"
+output: html_document
+---
+
+# Step 1: Define Helper Functions
+
+```{r}
+# Function to generate customer arrival times dynamically
+generate_arrival_times <- function(lambda_A, hours) {
+  total_time <- hours * 60
+  arrivals <- numeric(0)
+  current_time <- 0
+  while (current_time <= total_time) {
+    current_time <- current_time + rexp(1, rate = lambda_A / 60)
+    if (current_time <= total_time) {
+      arrivals <- c(arrivals, current_time)
+    }
+  }
+  arrivals
+}
+
+# Function to generate service times
+generate_service_times <- function(num_customers, lambda_S) {
+  rexp(num_customers, rate = lambda_S / 60)
+}
+
+# Function to simulate queue dynamics
+simulate_queue <- function(arrivals, service_times) {
+  num_customers <- length(arrivals)
+  if (num_customers == 0) {
+    stop("No customers arrived during the simulation period.")
+  }
+  
+  departure_times <- numeric(num_customers)
+  waiting_times <- numeric(num_customers)
+  queue_lengths <- numeric(num_customers)
+  down_time <- 0
+  
+  for (i in 1:num_customers) {
+    if (i == 1 || arrivals[i] >= departure_times[i - 1]) {
+      # No waiting
+      waiting_times[i] <- 0
+      departure_times[i] <- arrivals[i] + service_times[i]
+      
+      # Downtime calculation
+      if (i > 1 && departure_times[i - 1] < arrivals[i]) {
+        down_time <- down_time + (arrivals[i] - departure_times[i - 1])
+      }
+    } else {
+      # Customer waits
+      waiting_times[i] <- departure_times[i - 1] - arrivals[i]
+      departure_times[i] <- departure_times[i - 1] + service_times[i]
+    }
+    
+    # Queue length: count customers still waiting or being served
+    queue_lengths[i] <- sum(arrivals <= arrivals[i] & departure_times > arrivals[i])
+  }
+  
+  list(
+    waiting_times = waiting_times,
+    queue_lengths = queue_lengths,
+    down_time = down_time
+  )
+}
+```
+
+# Step 2: Compute Enhanced Performance Metrics
+
+```{r}
+# Function to compute summary metrics
+compute_summary_metrics <- function(simulation_results) {
+  list(
+    waiting_time = list(
+      mean = mean(simulation_results$waiting_times),
+      median = median(simulation_results$waiting_times),
+      variance = var(simulation_results$waiting_times),
+      percentiles = quantile(simulation_results$waiting_times, probs = c(0.25, 0.5, 0.75))
+    ),
+    queue_length = list(
+      mean = mean(simulation_results$queue_lengths),
+      max = max(simulation_results$queue_lengths)
+    ),
+    downtime = list(
+      total_minutes = simulation_results$down_time,
+      percentage = (simulation_results$down_time / (12 * 60)) * 100
+    )
+  )
+}
+
+# Function to compute hourly metrics
+compute_hourly_metrics <- function(arrivals, waiting_times, queue_lengths, hours) {
+  hourly_metrics <- data.frame(
+    hour = 1:hours,
+    avg_waiting_time = tapply(waiting_times, ceiling(arrivals / 60), mean, na.rm = TRUE),
+    avg_queue_length = tapply(queue_lengths, ceiling(arrivals / 60), mean, na.rm = TRUE)
+  )
+  hourly_metrics
+}
+```
+
+# Step 3: Visualize Results
+
+```{r}
+library(ggplot2)
+
+# Plot queue lengths over time
+plot_queue_lengths <- function(arrivals, queue_lengths) {
+  time_series <- data.frame(
+    time = arrivals,
+    queue_length = queue_lengths
+  )
+  ggplot(time_series, aes(x = time, y = queue_length)) +
+    geom_line(color = "blue") +
+    labs(title = "Queue Lengths Over Time", x = "Time (minutes)", y = "Queue Length") +
+    theme_minimal()
+}
+
+# Plot distribution of waiting times
+plot_waiting_time_distribution <- function(waiting_times) {
+  ggplot(data.frame(waiting_time = waiting_times), aes(x = waiting_time)) +
+    geom_histogram(binwidth = 1, fill = "blue", color = "black") +
+    labs(title = "Distribution of Waiting Times", x = "Waiting Time (minutes)", y = "Frequency") +
+    theme_minimal()
+}
+
+# Plot downtime during operating hours
+plot_downtime <- function(down_time, hours) {
+  barplot(
+    down_time,
+    main = "Downtime During Operating Hours",
+    xlab = "Hour",
+    ylab = "Downtime (minutes)",
+    col = "red"
+  )
+}
+```
+
+# Step 4: Run Simulation and Analyze
+
+```{r}
+# Parameters
+lambda_A <- 5  # Customer arrival rate (per hour)
+lambda_S <- 6  # Service rate (per hour)
+hours <- 12    # Operating hours (10am - 10pm)
+
+# Simulate arrivals and service times
+arrivals <- generate_arrival_times(lambda_A, hours)
+service_times <- generate_service_times(length(arrivals), lambda_S)
+
+# Run queue simulation
+simulation_results <- simulate_queue(arrivals, service_times)
+
+# Compute performance metrics
+summary_metrics <- compute_summary_metrics(simulation_results)
+hourly_metrics <- compute_hourly_metrics(arrivals, simulation_results$waiting_times, simulation_results$queue_lengths, hours)
+
+# Visualize results
+plot_queue_lengths(arrivals, simulation_results$queue_lengths)
+plot_waiting_time_distribution(simulation_results$waiting_times)
+```
