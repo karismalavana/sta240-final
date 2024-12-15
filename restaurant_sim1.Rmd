@@ -1,0 +1,243 @@
+---
+title: "Restaurant Simulation Analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Install required packages if not already installed
+if (!require("ggplot2")) install.packages("ggplot2")
+if (!require("tidyr")) install.packages("tidyr")
+```
+
+```{r helper_functions}
+
+generate_arrival_times <- function(lambda_A, hours) {
+  total_time <- hours * 60
+  arrivals <- numeric(0)
+  current_time <- 0
+  while (current_time <= total_time) {
+    current_time <- current_time + rexp(1, rate = lambda_A / 60)
+    if (current_time <= total_time) {
+      arrivals <- c(arrivals, current_time)
+    }
+  }
+  arrivals
+}
+
+generate_service_times <- function(num_customers, lambda_S) {
+  rexp(num_customers, rate = lambda_S / 60)
+}
+
+simulate_queue <- function(arrivals, service_times) {
+  num_customers <- length(arrivals)
+  if (num_customers == 0) {
+    stop("No customers arrived during the simulation period.")
+  }
+  
+  departure_times <- numeric(num_customers)
+  waiting_times <- numeric(num_customers)
+  queue_lengths <- numeric(num_customers)
+  down_time <- 0
+  
+  for (i in 1:num_customers) {
+    if (i == 1 || arrivals[i] >= departure_times[i - 1]) {
+      waiting_times[i] <- 0
+      departure_times[i] <- arrivals[i] + service_times[i]
+      
+      if (i > 1 && departure_times[i - 1] < arrivals[i]) {
+        down_time <- down_time + (arrivals[i] - departure_times[i - 1])
+      }
+    } else {
+      waiting_times[i] <- departure_times[i - 1] - arrivals[i]
+      departure_times[i] <- departure_times[i - 1] + service_times[i]
+    }
+    
+    queue_lengths[i] <- sum(arrivals <= arrivals[i] & departure_times > arrivals[i])
+  }
+  
+  list(
+    waiting_times = waiting_times,
+    queue_lengths = queue_lengths,
+    down_time = down_time,
+    departure_times = departure_times
+  )
+}
+
+calculate_metrics <- function(results) {
+  list(
+    avg_waiting_time = mean(results$waiting_times),
+    max_waiting_time = max(results$waiting_times),
+    p95_waiting_time = quantile(results$waiting_times, 0.95),
+    avg_queue_length = mean(results$queue_lengths),
+    max_queue_length = max(results$queue_lengths),
+    p95_queue_length = quantile(results$queue_lengths, 0.95),
+    total_down_time = results$down_time / 60
+  )
+}
+
+simulate_single_day <- function(lambda_A, lambda_S, hours) {
+  arrival_times <- generate_arrival_times(lambda_A, hours)
+  service_times <- generate_service_times(length(arrival_times), lambda_S)
+  queue_results <- simulate_queue(arrival_times, service_times)
+  
+  metrics <- calculate_metrics(queue_results)
+  metrics$num_customers <- length(arrival_times)
+  
+  return(metrics)
+}
+
+run_multi_day_simulation <- function(num_days, lambda_A, lambda_S, hours) {
+  results <- data.frame(
+    day = 1:num_days,
+    avg_waiting_time = numeric(num_days),
+    max_waiting_time = numeric(num_days),
+    p95_waiting_time = numeric(num_days),
+    avg_queue_length = numeric(num_days),
+    max_queue_length = numeric(num_days),
+    p95_queue_length = numeric(num_days),
+    total_down_time = numeric(num_days),
+    num_customers = numeric(num_days)
+  )
+  
+  for(i in 1:num_days) {
+    daily_metrics <- simulate_single_day(lambda_A, lambda_S, hours)
+    results[i, -1] <- unlist(daily_metrics)
+  }
+  
+  return(results)
+}
+
+calculate_summary_statistics <- function(multi_day_results) {
+  metrics <- colnames(multi_day_results)[-1]
+  
+  summary_stats <- lapply(metrics, function(metric) {
+    values <- multi_day_results[[metric]]
+    c(
+      mean = mean(values),
+      sd = sd(values),
+      q25 = quantile(values, 0.25),
+      median = median(values),
+      q75 = quantile(values, 0.75),
+      min = min(values),
+      max = max(values)
+    )
+  })
+  
+  names(summary_stats) <- metrics
+  return(summary_stats)
+}
+
+perform_stress_test <- function(base_lambda_A, base_lambda_S, hours, num_days=100) {
+  arrival_variations <- c(0.5, 0.75, 1, 1.25, 1.5) * base_lambda_A
+  service_variations <- c(0.75, 1, 1.25) * base_lambda_S
+  
+  results <- expand.grid(
+    arrival_rate = arrival_variations,
+    service_rate = service_variations
+  )
+  
+  results$avg_wait <- NA
+  results$avg_queue <- NA
+  results$down_time <- NA
+  
+  for(i in 1:nrow(results)) {
+    sim_results <- run_multi_day_simulation(
+      num_days,
+      results$arrival_rate[i],
+      results$service_rate[i],
+      hours
+    )
+    
+    summary_stats <- calculate_summary_statistics(sim_results)
+    
+    results$avg_wait[i] <- summary_stats$avg_waiting_time["mean"]
+    results$avg_queue[i] <- summary_stats$avg_queue_length["mean"]
+    results$down_time[i] <- summary_stats$total_down_time["mean"]
+  }
+  
+  return(results)
+}
+```
+
+```{r run_simulation}
+# Set parameters
+set.seed(123)  # For reproducibility
+num_days <- 100
+lambda_A <- 5  # Customer arrival rate (per hour)
+lambda_S <- 6  # Service rate (per hour)
+hours <- 12    # Operating hours (10 AM - 10 PM)
+
+
+multi_day_results <- run_multi_day_simulation(num_days, lambda_A, lambda_S, hours)
+
+summary_stats <- calculate_summary_statistics(multi_day_results)
+print("Multi-day summary statistics:")
+print(summary_stats)
+```
+
+```{r visualize_results}
+library(ggplot2)
+
+
+p1 <- ggplot(multi_day_results, aes(x=day, y=avg_waiting_time)) +
+  geom_line() +
+  geom_smooth(method="loess", span=0.2) +
+  labs(title="Daily Average Waiting Times",
+       x="Day",
+       y="Average Waiting Time (minutes)") +
+  theme_minimal()
+print(p1)
+
+
+p2 <- ggplot(multi_day_results, aes(x=day, y=avg_queue_length)) +
+  geom_line() +
+  geom_smooth(method="loess", span=0.2) +
+  labs(title="Daily Average Queue Lengths",
+       x="Day",
+       y="Average Queue Length") +
+  theme_minimal()
+print(p2)
+
+
+metrics_long <- tidyr::pivot_longer(
+  multi_day_results,
+  cols = c("avg_waiting_time", "avg_queue_length", "total_down_time"),
+  names_to = "metric",
+  values_to = "value"
+)
+
+p3 <- ggplot(metrics_long, aes(x=metric, y=value)) +
+  geom_boxplot() +
+  labs(title="Distribution of Key Metrics Across Days",
+       x="Metric",
+       y="Value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+print(p3)
+```
+
+```{r stress_testing}
+stress_test_results <- perform_stress_test(lambda_A, lambda_S, hours)
+
+#  stress test results
+p4 <- ggplot(stress_test_results, aes(x=arrival_rate, y=avg_wait, color=factor(service_rate))) +
+  geom_line() +
+  geom_point() +
+  labs(title="Average Wait Time Under Different Conditions",
+       x="Arrival Rate (customers/hour)",
+       y="Average Wait Time (minutes)",
+       color="Service Rate") +
+  theme_minimal()
+print(p4)
+
+p5 <- ggplot(stress_test_results, aes(x=arrival_rate, y=avg_queue, color=factor(service_rate))) +
+  geom_line() +
+  geom_point() +
+  labs(title="Average Queue Length Under Different Conditions",
+       x="Arrival Rate (customers/hour)",
+       y="Average Queue Length",
+       color="Service Rate") +
+  theme_minimal()
+print(p5)
+```
